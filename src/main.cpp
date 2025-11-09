@@ -7,69 +7,132 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
-#include <iostream>
 
-void initializeUI() {
+void initColors() {
+    start_color();
+    use_default_colors();
+    init_pair(1, COLOR_WHITE, COLOR_BLUE);     // Header and borders
+    init_pair(2, COLOR_BLACK, COLOR_CYAN);     // Highlight selected row
+    init_pair(3, COLOR_WHITE, -1);              // Normal text
+    init_pair(4, COLOR_GREEN, -1);              // System info or positive info
+    init_pair(5, COLOR_RED, -1);                // Error or warnings
+}
+
+void drawBox(WINDOW* win) {
+    wbkgd(win, COLOR_PAIR(1));
+    box(win, 0, 0);
+    wrefresh(win);
+}
+
+void displaySystemInfo(WINDOW* win) {
+    werase(win);
+    wattron(win, COLOR_PAIR(4) | A_BOLD);
+    mvwprintw(win, 1, 2, "System Information");
+    wattroff(win, COLOR_PAIR(4) | A_BOLD);
+
+    CPUData cpu = readCPUStats();
+    MemoryInfo mem = readMemoryInfo();
+    double uptime = getUptime();
+
+    mvwprintw(win, 3, 2, "Uptime: %.2f hours", uptime / 3600.0);
+    mvwprintw(win, 4, 2, "Memory: %ld MB / %ld MB", (mem.totalMem - mem.availableMem) / 1024, mem.totalMem / 1024);
+
+    drawBox(win);
+}
+
+void displayProcessList(WINDOW* win, const std::vector<ProcessInfo>& processes, int selectedRow) {
+    werase(win);
+
+    wattron(win, COLOR_PAIR(1));
+    box(win, 0, 0);
+    wattroff(win, COLOR_PAIR(1));
+
+    wattron(win, A_BOLD | COLOR_PAIR(4));
+    mvwprintw(win, 1, 2, "PID");
+    mvwprintw(win, 1, 10, "USER");
+    mvwprintw(win, 1, 22, "STATE");
+    mvwprintw(win, 1, 30, "MEM(KB)");
+    mvwprintw(win, 1, 40, "MEM%%");
+    mvwprintw(win, 1, 46, "COMMAND");
+    wattroff(win, A_BOLD | COLOR_PAIR(4));
+
+    int maxRows, maxCols;
+    getmaxyx(win, maxRows, maxCols);
+
+    int displayCount = maxRows - 3;
+    for (int i = 0; i < displayCount && i < (int)processes.size(); ++i) {
+        int y = i + 2;
+        if (i == selectedRow) {
+            wattron(win, COLOR_PAIR(2));
+            mvwprintw(win, y, 2, "%-6d %-10s %-6c %-8lu %6.2f %s",
+                      processes[i].pid, processes[i].user.c_str(), processes[i].state,
+                      processes[i].memUsage, processes[i].memPercent, processes[i].command.c_str());
+            wattroff(win, COLOR_PAIR(2));
+        } else {
+            wattron(win, COLOR_PAIR(3));
+            mvwprintw(win, y, 2, "%-6d %-10s %-6c %-8lu %6.2f %s",
+                      processes[i].pid, processes[i].user.c_str(), processes[i].state,
+                      processes[i].memUsage, processes[i].memPercent, processes[i].command.c_str());
+            wattroff(win, COLOR_PAIR(3));
+        }
+    }
+    wrefresh(win);
+}
+
+bool killProcess(int pid, WINDOW* statusWin) {
+    if (kill(pid, SIGTERM) == 0) {
+        werase(statusWin);
+        wattron(statusWin, COLOR_PAIR(4));
+        mvwprintw(statusWin, 0, 0, "SIGTERM sent to process %d", pid);
+        wattroff(statusWin, COLOR_PAIR(4));
+        wrefresh(statusWin);
+        return true;
+    }
+    if (kill(pid, SIGKILL) == 0) {
+        werase(statusWin);
+        wattron(statusWin, COLOR_PAIR(4));
+        mvwprintw(statusWin, 0, 0, "SIGKILL sent to process %d", pid);
+        wattroff(statusWin, COLOR_PAIR(4));
+        wrefresh(statusWin);
+        return true;
+    }
+    werase(statusWin);
+    wattron(statusWin, COLOR_PAIR(5));
+    mvwprintw(statusWin, 0, 0, "Failed to kill process %d: %s", pid, strerror(errno));
+    wattroff(statusWin, COLOR_PAIR(5));
+    wrefresh(statusWin);
+    return false;
+}
+
+int main() {
     initscr();
     cbreak();
     noecho();
     curs_set(0);
     keypad(stdscr, TRUE);
-    timeout(1000);
-}
 
-void displaySystemInfo() {
-    CPUData cpu = readCPUStats();
-    MemoryInfo mem = readMemoryInfo();
-    double uptime = getUptime();
-    mvprintw(0, 0, "=== System Monitor ===");
-    mvprintw(1, 0, "Uptime: %.2f hours", uptime / 3600.0);
-    mvprintw(2, 0, "Memory: %ld MB / %ld MB", 
-             (mem.totalMem - mem.availableMem) / 1024, 
-             mem.totalMem / 1024);
-}
-
-void displayProcesses(std::vector<ProcessInfo>& processes, int startRow, int selectedRow) {
-    mvprintw(startRow, 0, "%-8s %-10s %-8s %-10s %-8s %s", "PID", "USER", "STATE", "MEM (KB)", "MEM %", "COMMAND");
-    int row = startRow + 1;
-    for (size_t i = 0; i < processes.size(); ++i) {
-        if (row >= LINES - 3) break;
-        if (i == selectedRow) attron(A_REVERSE);
-        mvprintw(row++, 0, "%-8d %-10s %-8c %-10lu %-8.2f %s",
-                 processes[i].pid,
-                 processes[i].user.c_str(),
-                 processes[i].state,
-                 processes[i].memUsage,
-                 processes[i].memPercent,
-                 processes[i].command.c_str());
-        if (i == selectedRow) attroff(A_REVERSE);
+    if (!has_colors()) {
+        endwin();
+        printf("Your terminal does not support color\n");
+        return 1;
     }
-}
+    initColors();
 
-bool killProcess(int pid) {
-    if (kill(pid, SIGTERM) == 0) {
-        mvprintw(LINES - 1, 0, "Sent SIGTERM to process %d", pid);
-        refresh();
-        return true;
-    }
-    if (kill(pid, SIGKILL) == 0) {
-        mvprintw(LINES - 1, 0, "Sent SIGKILL to process %d", pid);
-        refresh();
-        return true;
-    }
-    mvprintw(LINES - 1, 0, "Failed to kill process %d: %s", pid, strerror(errno));
-    refresh();
-    return false;
-}
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
 
-int main() {
-    initializeUI();
-    int sortMode = 2; // default sort by memory
+    WINDOW* sysWin = newwin(7, cols / 2 - 1, 0, 0);
+    WINDOW* procWin = newwin(rows - 7, cols, 7, 0);
+    WINDOW* statusWin = newwin(1, cols, rows - 1, 0);
+
+    int sortMode = 2;
     int selectedRow = 0;
 
     while (true) {
-        clear();
-        displaySystemInfo();
+        werase(stdscr);
+        refresh();
+
+        displaySystemInfo(sysWin);
 
         std::vector<int> pids = getProcessPIDs();
         std::vector<ProcessInfo> processes;
@@ -81,31 +144,53 @@ int main() {
             proc.memPercent = (mem.totalMem > 0) ? (100.0 * proc.memUsage / mem.totalMem) : 0;
             processes.push_back(proc);
         }
+
         sortProcesses(processes, sortMode);
 
-        displayProcesses(processes, 4, selectedRow);
+        displayProcessList(procWin, processes, selectedRow);
 
-        mvprintw(LINES - 3, 0, "Sort: [P]ID [C]PU [M]emory | [Up/Down] Select | [K]ill | [Q]uit");
+        werase(statusWin);
+        wattron(statusWin, COLOR_PAIR(1));
+        mvwprintw(statusWin, 0, 0, "Sort: [P]ID [C]PU [M]emory | [Up/Down] Select | [K]ill | [Q]uit");
+        wattroff(statusWin, COLOR_PAIR(1));
+        wrefresh(statusWin);
 
         int ch = getch();
-        switch(ch) {
-            case 'p': case 'P': sortMode = 0; break;
-            case 'c': case 'C': sortMode = 1; break;
-            case 'm': case 'M': sortMode = 2; break;
-            case KEY_UP: if (selectedRow > 0) --selectedRow; break;
-            case KEY_DOWN: if (selectedRow < (int)processes.size() - 1) ++selectedRow; break;
-            case 'k': case 'K':
-                if (selectedRow >= 0 && selectedRow < (int)processes.size()) {
-                    bool confirm = true; // add confirmation logic if desired
-                    if (confirm) killProcess(processes[selectedRow].pid);
-                }
-                break;
-            case 'q': case 'Q':
-                endwin();
-                return 0;
+        switch (ch) {
+        case 'p':
+        case 'P':
+            sortMode = 0;
+            break;
+        case 'c':
+        case 'C':
+            sortMode = 1;
+            break;
+        case 'm':
+        case 'M':
+            sortMode = 2;
+            break;
+        case KEY_UP:
+            if (selectedRow > 0) selectedRow--;
+            break;
+        case KEY_DOWN:
+            if (selectedRow < (int)processes.size() - 1) selectedRow++;
+            break;
+        case 'k':
+        case 'K':
+            if (selectedRow >= 0 && selectedRow < (int)processes.size()) {
+                killProcess(processes[selectedRow].pid, statusWin);
+            }
+            break;
+        case 'q':
+        case 'Q':
+            delwin(sysWin);
+            delwin(procWin);
+            delwin(statusWin);
+            endwin();
+            return 0;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
     }
-    endwin();
+
     return 0;
 }
