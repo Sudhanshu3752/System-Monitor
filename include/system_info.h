@@ -21,7 +21,7 @@ struct ProcessInfo {
     std::string command;
     float cpuPercent;
     float memPercent;
-    unsigned long memUsage; // in KB
+    unsigned long memUsage;
     char state;
 };
 
