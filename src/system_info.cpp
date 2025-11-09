@@ -13,10 +13,9 @@ CPUData readCPUStats() {
     CPUData data = {0};
     FILE* file = fopen("/proc/stat", "r");
     if (file) {
-        fscanf(file, "cpu %llu %llu %llu %llu", 
+        fscanf(file, "cpu %llu %llu %llu %llu",
                &data.user, &data.nice, &data.system, &data.idle);
         fclose(file);
-
         data.active = data.user + data.nice + data.system;
         data.total = data.active + data.idle;
     }
@@ -56,7 +55,8 @@ std::vector<int> getProcessPIDs() {
         while ((entry = readdir(dir)) != nullptr) {
             if (entry->d_type == DT_DIR) {
                 int pid = atoi(entry->d_name);
-                if (pid > 0) pids.push_back(pid);
+                if (pid > 0)
+                    pids.push_back(pid);
             }
         }
         closedir(dir);
@@ -65,13 +65,13 @@ std::vector<int> getProcessPIDs() {
 }
 
 ProcessInfo readProcessInfo(int pid) {
-    ProcessInfo proc;
+    ProcessInfo proc{};
     proc.pid = pid;
-    proc.cpuPercent = 0.0;
-    proc.memPercent = 0.0;
+    proc.cpuPercent = 0.0f;
+    proc.memPercent = 0.0f;
     proc.memUsage = 0;
     proc.state = '?';
-    // /proc/[pid]/stat
+
     char statPath[256];
     snprintf(statPath, sizeof(statPath), "/proc/%d/stat", pid);
 
@@ -81,24 +81,21 @@ ProcessInfo readProcessInfo(int pid) {
         long rss = 0;
         char comm[256] = {0};
         fscanf(file, "%d (%[^)]) %c", &proc.pid, comm, &proc.state);
-        for (int i = 0; i < 11; ++i) fscanf(file, "%*s");
+        for (int i = 0; i < 11; i++) fscanf(file, "%*s");
         fscanf(file, "%lu %lu", &utime, &stime);
-        for (int i = 0; i < 7; ++i) fscanf(file, "%*s");
+        for (int i = 0; i < 7; i++) fscanf(file, "%*s");
         fscanf(file, "%ld", &rss);
         fclose(file);
-
-        proc.memUsage = rss * sysconf(_SC_PAGESIZE) / 1024; // KB
+        proc.memUsage = rss * sysconf(_SC_PAGESIZE) / 1024;
         proc.command = comm;
     }
-
-    // /proc/[pid]/cmdline
     char cmdPath[256];
     snprintf(cmdPath, sizeof(cmdPath), "/proc/%d/cmdline", pid);
     file = fopen(cmdPath, "r");
     if (file) {
         char cmd[256] = {0};
         fread(cmd, 1, sizeof(cmd) - 1, file);
-        if (cmd[0] != 0) proc.command = cmd;
+        if (cmd[0] != '\0') proc.command = cmd;
         fclose(file);
     }
     return proc;
@@ -125,17 +122,20 @@ std::string getProcessUser(int pid) {
 }
 
 void sortProcesses(std::vector<ProcessInfo>& processes, int mode) {
-    if (mode == 0) { // PID
-        std::sort(processes.begin(), processes.end(), [](const ProcessInfo& a, const ProcessInfo& b) {
-            return a.pid < b.pid;
-        });
-    } else if (mode == 1) { // CPU (not implemented fully here as true per-process CPU requires sampling)
-        std::sort(processes.begin(), processes.end(), [](const ProcessInfo& a, const ProcessInfo& b) {
-            return a.cpuPercent > b.cpuPercent;
-        });
-    } else if (mode == 2) { // Memory
-        std::sort(processes.begin(), processes.end(), [](const ProcessInfo& a, const ProcessInfo& b) {
-            return a.memUsage > b.memUsage;
-        });
+    if (mode == 0) {
+        std::sort(processes.begin(), processes.end(),
+                  [](const ProcessInfo& a, const ProcessInfo& b) {
+                      return a.pid < b.pid;
+                  });
+    } else if (mode == 1) {
+        std::sort(processes.begin(), processes.end(),
+                  [](const ProcessInfo& a, const ProcessInfo& b) {
+                      return a.cpuPercent > b.cpuPercent;
+                  });
+    } else if (mode == 2) {
+        std::sort(processes.begin(), processes.end(),
+                  [](const ProcessInfo& a, const ProcessInfo& b) {
+                      return a.memUsage > b.memUsage;
+                  });
     }
 }
